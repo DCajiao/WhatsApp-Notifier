@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 MASKED_IDENTIFIER_KEYS = {"accountid", "socialaccountid"}
 SECRET_KEY_MARKERS = {"authorization", "apikey", "secret", "token"}
+DATABASE_UNAVAILABLE_RETRY_DELAYS_SECONDS = (2, 5, 10, 20, 30)
 
 
 class ZernioDeliveryError(RuntimeError):
@@ -200,72 +201,93 @@ class ZernioClient:
         clean_params = {
             key: value for key, value in (params or {}).items() if value is not None
         }
-        started = time.monotonic()
-        log_zernio_event(
-            logging.INFO,
-            "zernio_request_started",
-            method=method,
-            path=path,
-            params=sanitize(clean_params),
-            request_body=sanitize(json_body or {}),
-            timeout_seconds=self.timeout,
-        )
-        try:
-            response = self.session.request(
+        attempt = 1
+        while True:
+            started = time.monotonic()
+            log_zernio_event(
+                logging.INFO,
+                "zernio_request_started",
+                attempt=attempt,
                 method=method,
-                url=url,
-                params=clean_params,
-                json=json_body,
-                headers=headers,
-                timeout=self.timeout,
+                path=path,
+                params=sanitize(clean_params),
+                request_body=sanitize(json_body or {}),
+                timeout_seconds=self.timeout,
             )
-        except requests.RequestException as exc:
+            try:
+                response = self.session.request(
+                    method=method,
+                    url=url,
+                    params=clean_params,
+                    json=json_body,
+                    headers=headers,
+                    timeout=self.timeout,
+                )
+            except requests.RequestException as exc:
+                log_entry = {
+                    "attempt": attempt,
+                    "method": method,
+                    "path": path,
+                    "params": sanitize(clean_params),
+                    "request_body": sanitize(json_body or {}),
+                    "status_code": None,
+                    "duration_ms": elapsed_ms(started),
+                    "response": {"error": str(exc)},
+                }
+                self.zernio_log.append(log_entry)
+                log_zernio_event(
+                    logging.ERROR,
+                    "zernio_request_failed",
+                    **log_entry,
+                    error_type=type(exc).__name__,
+                )
+                raise ZernioDeliveryError(
+                    f"Zernio request failed: {exc}",
+                    deepcopy(self.zernio_log),
+                ) from exc
+
+            payload = parse_response(response)
+
             log_entry = {
+                "attempt": attempt,
                 "method": method,
                 "path": path,
                 "params": sanitize(clean_params),
                 "request_body": sanitize(json_body or {}),
-                "status_code": None,
+                "status_code": response.status_code,
                 "duration_ms": elapsed_ms(started),
-                "response": {"error": str(exc)},
+                "response": sanitize(payload),
             }
             self.zernio_log.append(log_entry)
             log_zernio_event(
-                logging.ERROR,
-                "zernio_request_failed",
+                logging.WARNING if response.status_code >= 400 else logging.INFO,
+                "zernio_request_finished",
                 **log_entry,
-                error_type=type(exc).__name__,
-            )
-            raise ZernioDeliveryError(
-                f"Zernio request failed: {exc}",
-                deepcopy(self.zernio_log),
-            ) from exc
-
-        payload = parse_response(response)
-
-        log_entry = {
-            "method": method,
-            "path": path,
-            "params": sanitize(clean_params),
-            "request_body": sanitize(json_body or {}),
-            "status_code": response.status_code,
-            "duration_ms": elapsed_ms(started),
-            "response": sanitize(payload),
-        }
-        self.zernio_log.append(log_entry)
-        log_zernio_event(
-            logging.WARNING if response.status_code >= 400 else logging.INFO,
-            "zernio_request_finished",
-            **log_entry,
-        )
-
-        if response.status_code >= 400:
-            raise ZernioDeliveryError(
-                format_zernio_error(response.status_code, payload),
-                deepcopy(self.zernio_log),
             )
 
-        return payload
+            if response.status_code >= 400:
+                if is_zernio_database_unavailable(response.status_code, payload):
+                    delay = retry_delay_seconds(attempt)
+                    log_zernio_event(
+                        logging.WARNING,
+                        "zernio_request_retrying",
+                        attempt=attempt,
+                        next_attempt=attempt + 1,
+                        delay_seconds=delay,
+                        path=path,
+                        status_code=response.status_code,
+                        response=sanitize(payload),
+                    )
+                    time.sleep(delay)
+                    attempt += 1
+                    continue
+
+                raise ZernioDeliveryError(
+                    format_zernio_error(response.status_code, payload),
+                    deepcopy(self.zernio_log),
+                )
+
+            return payload
 
 
 def digits_only(value: Any) -> str:
@@ -371,6 +393,19 @@ def parse_timeout_seconds(value: Any) -> float:
     except (TypeError, ValueError):
         return 70
     return timeout if timeout > 0 else 70
+
+
+def is_zernio_database_unavailable(status_code: int, payload: Any) -> bool:
+    if status_code != 503 or not isinstance(payload, dict):
+        return False
+    code = str(payload.get("code") or "").lower()
+    message = str(payload.get("error") or payload.get("message") or "").lower()
+    return code == "temporarily_unavailable" and "database" in message
+
+
+def retry_delay_seconds(attempt: int) -> int:
+    index = max(0, min(attempt - 1, len(DATABASE_UNAVAILABLE_RETRY_DELAYS_SECONDS) - 1))
+    return DATABASE_UNAVAILABLE_RETRY_DELAYS_SECONDS[index]
 
 
 def elapsed_ms(started: float) -> int:

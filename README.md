@@ -67,17 +67,18 @@ La API queda en:
 http://localhost:8000
 ```
 
-El contenedor corre Gunicorn con 2 workers, 4 threads por worker y timeout de
-90 segundos porque algunos envios de Zernio pueden tardar mas de 30 segundos en
-responder. Los access logs salen por stdout.
+El contenedor corre Gunicorn con 2 workers, 4 threads por worker y timeout
+desactivado porque el cliente reintenta indefinidamente cuando Zernio responde
+que no puede alcanzar su base de datos. Los access logs salen por stdout.
 
 ## Logs
 
 La app escribe logs estructurados por stdout, por lo que Render los muestra
 directamente en el panel del servicio. Para diagnosticar Zernio, busca eventos
 como `zernio_request_started`, `zernio_request_finished`,
-`alert_delivery_succeeded` y `alert_delivery_failed`. Los logs incluyen path,
-duracion, status code y respuesta sanitizada; no incluyen tokens ni API keys.
+`zernio_request_retrying`, `alert_delivery_succeeded` y
+`alert_delivery_failed`. Los logs incluyen intento, path, duracion, status code
+y respuesta sanitizada; no incluyen tokens ni API keys.
 
 Probar healthcheck:
 

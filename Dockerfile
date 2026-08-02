@@ -12,4 +12,4 @@ COPY . .
 
 EXPOSE 8000
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "--threads", "4", "--timeout", "90", "--access-logfile", "-", "--error-logfile", "-", "whatsapp_notifier.app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "--threads", "4", "--timeout", "0", "--access-logfile", "-", "--error-logfile", "-", "whatsapp_notifier.app:app"]

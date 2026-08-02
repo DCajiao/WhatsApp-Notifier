@@ -134,6 +134,103 @@ def test_send_alert_logs_zernio_request_without_credentials(caplog):
     assert "secret-key" not in caplog.text
 
 
+def test_send_alert_retries_database_unavailable_until_success(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(
+        "whatsapp_notifier.zernio_client.time.sleep",
+        lambda seconds: sleeps.append(seconds),
+    )
+    session = FakeSession(
+        [
+            FakeResponse(
+                503,
+                {
+                    "type": "api_error",
+                    "code": "temporarily_unavailable",
+                    "error": "Temporary service issue while reaching the database.",
+                },
+            ),
+            FakeResponse(
+                503,
+                {
+                    "type": "api_error",
+                    "code": "temporarily_unavailable",
+                    "error": "Temporary service issue while reaching the database.",
+                },
+            ),
+            FakeResponse(
+                200,
+                {
+                    "data": {
+                        "messageId": "wamid.after-retry",
+                        "conversationId": "conversation-1",
+                    }
+                },
+            ),
+        ]
+    )
+    client = ZernioClient(
+        api_key="secret-key",
+        base_url="https://zernio.example/api/v1",
+        account_id="account-1",
+        sender_phone="+12025550100",
+        recipient_phone="+15550001111",
+        conversation_id="conversation-1",
+        session=session,
+    )
+
+    result = client.send_alert("Alerta con retry")
+
+    assert result["ok"] is True
+    assert result["result"]["message_id"] == "wamid.after-retry"
+    assert len(session.calls) == 3
+    assert [entry["attempt"] for entry in result["zernio_log"]] == [1, 2, 3]
+    assert [entry["status_code"] for entry in result["zernio_log"]] == [503, 503, 200]
+    assert sleeps == [2, 5]
+
+
+def test_send_alert_does_not_retry_unrelated_503(monkeypatch):
+    monkeypatch.setattr(
+        "whatsapp_notifier.zernio_client.time.sleep",
+        lambda seconds: pytest.fail(f"unexpected sleep: {seconds}"),
+    )
+    session = FakeSession(
+        [
+            FakeResponse(
+                503,
+                {
+                    "type": "api_error",
+                    "code": "temporarily_unavailable",
+                    "error": "Scheduled maintenance.",
+                },
+            ),
+            FakeResponse(
+                200,
+                {
+                    "data": {
+                        "messageId": "wamid.should-not-send",
+                        "conversationId": "conversation-1",
+                    }
+                },
+            ),
+        ]
+    )
+    client = ZernioClient(
+        api_key="secret-key",
+        base_url="https://zernio.example/api/v1",
+        account_id="account-1",
+        sender_phone="+12025550100",
+        recipient_phone="+15550001111",
+        conversation_id="conversation-1",
+        session=session,
+    )
+
+    with pytest.raises(ZernioDeliveryError):
+        client.send_alert("Alerta sin retry")
+
+    assert len(session.calls) == 1
+
+
 def test_sanitize_masks_phone_values_without_masking_messages_with_dates():
     assert sanitize("+573113232581") == "+573...2581"
     assert sanitize("573113232581") == "+573...2581"
