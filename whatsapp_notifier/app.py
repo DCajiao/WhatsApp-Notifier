@@ -21,6 +21,7 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
         ZERNIO_ACCOUNT_ID="",
         ZERNIO_SENDER_PHONE="",
         ZERNIO_CONVERSATION_ID="",
+        ZERNIO_TIMEOUT_SECONDS="70",
     )
 
     for key in (
@@ -31,6 +32,7 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
         "ZERNIO_ACCOUNT_ID",
         "ZERNIO_SENDER_PHONE",
         "ZERNIO_CONVERSATION_ID",
+        "ZERNIO_TIMEOUT_SECONDS",
     ):
         if key in os.environ:
             app.config[key] = os.environ[key]
@@ -40,6 +42,16 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
 
     if app.config.get("ZERNIO_CLIENT") is None:
         app.config["ZERNIO_CLIENT"] = ZernioClient.from_config(app.config)
+
+    @app.get("/")
+    def index():
+        return jsonify(
+            {
+                "ok": True,
+                "service": "whatsapp-notifier",
+                "endpoints": ["/health", "/alert"],
+            }
+        )
 
     @app.get("/health")
     def health():

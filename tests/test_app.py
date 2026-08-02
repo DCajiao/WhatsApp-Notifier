@@ -61,6 +61,17 @@ def test_alert_requires_bearer_token(client):
     assert response.get_json() == {"ok": False, "error": "unauthorized"}
 
 
+def test_root_returns_service_status(client):
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "ok": True,
+        "service": "whatsapp-notifier",
+        "endpoints": ["/health", "/alert"],
+    }
+
+
 def test_alert_sends_body_message_when_token_is_valid(client):
     response = client.post(
         "/alert",

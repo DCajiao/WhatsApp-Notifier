@@ -40,6 +40,7 @@ ZERNIO_API_URL=https://zernio.com/api/v1
 ZERNIO_ACCOUNT_ID=replace-with-your-zernio-whatsapp-account-id
 ZERNIO_SENDER_PHONE=replace-with-your-zernio-whatsapp-sender
 ZERNIO_CONVERSATION_ID=
+ZERNIO_TIMEOUT_SECONDS=70
 RECIPIENT_PHONE=replace-with-recipient-phone-international-format
 ```
 
@@ -64,6 +65,10 @@ La API queda en:
 ```text
 http://localhost:8000
 ```
+
+El contenedor corre Gunicorn con 2 workers, 4 threads por worker y timeout de
+90 segundos porque algunos envios de Zernio pueden tardar mas de 30 segundos en
+responder. Los access logs salen por stdout.
 
 Probar healthcheck:
 

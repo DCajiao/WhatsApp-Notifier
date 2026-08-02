@@ -66,6 +66,38 @@ def test_send_alert_posts_to_configured_conversation():
     assert "Authorization" not in result["zernio_log"][0]
 
 
+def test_from_config_uses_configured_timeout_seconds():
+    session = FakeSession(
+        [
+            FakeResponse(
+                200,
+                {
+                    "data": {
+                        "messageId": "wamid.timeout",
+                        "conversationId": "conversation-1",
+                    }
+                },
+            )
+        ]
+    )
+    client = ZernioClient.from_config(
+        {
+            "ZERNIO_API_KEY": "secret-key",
+            "ZERNIO_API_URL": "https://zernio.example/api/v1",
+            "ZERNIO_ACCOUNT_ID": "account-1",
+            "ZERNIO_SENDER_PHONE": "+12025550100",
+            "RECIPIENT_PHONE": "+15550001111",
+            "ZERNIO_CONVERSATION_ID": "conversation-1",
+            "ZERNIO_TIMEOUT_SECONDS": "75",
+            "ZERNIO_SESSION": session,
+        }
+    )
+
+    client.send_alert("CPU alta")
+
+    assert session.calls[0]["timeout"] == 75
+
+
 def test_send_alert_finds_existing_whatsapp_conversation_before_sending():
     session = FakeSession(
         [

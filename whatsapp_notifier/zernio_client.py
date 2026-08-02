@@ -22,6 +22,8 @@ class ZernioClient:
             sender_phone=config.get("ZERNIO_SENDER_PHONE", ""),
             recipient_phone=config.get("RECIPIENT_PHONE", ""),
             conversation_id=config.get("ZERNIO_CONVERSATION_ID", ""),
+            session=config.get("ZERNIO_SESSION"),
+            timeout=parse_timeout_seconds(config.get("ZERNIO_TIMEOUT_SECONDS")),
         )
 
     def __init__(
@@ -33,7 +35,7 @@ class ZernioClient:
         recipient_phone: str,
         conversation_id: str = "",
         session: Optional[requests.Session] = None,
-        timeout: int = 30,
+        timeout: float = 70,
     ) -> None:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
@@ -308,3 +310,13 @@ def format_zernio_error(status_code: int, payload: Any) -> str:
         if error:
             return f"Zernio HTTP {status_code}: {error}"
     return f"Zernio HTTP {status_code}: {payload}"
+
+
+def parse_timeout_seconds(value: Any) -> float:
+    if value in (None, ""):
+        return 70
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        return 70
+    return timeout if timeout > 0 else 70
