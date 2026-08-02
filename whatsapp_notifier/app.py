@@ -57,7 +57,7 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
 
         try:
             result = current_app.config["ZERNIO_CLIENT"].send_alert(message)
-        except RuntimeError as exc:
+        except Exception as exc:
             zernio_log = getattr(exc, "zernio_log", [])
             return (
                 jsonify({"ok": False, "error": str(exc), "zernio_log": zernio_log}),

@@ -1,4 +1,5 @@
 import pytest
+import requests
 
 from whatsapp_notifier.zernio_client import ZernioClient, ZernioDeliveryError
 
@@ -21,6 +22,11 @@ class FakeSession:
     def request(self, **kwargs):
         self.calls.append(kwargs)
         return self.responses.pop(0)
+
+
+class TimeoutSession:
+    def request(self, **kwargs):
+        raise requests.Timeout("request timed out")
 
 
 def test_send_alert_posts_to_configured_conversation():
@@ -140,3 +146,22 @@ def test_send_alert_raises_error_with_zernio_log_when_api_fails():
     assert "TEMPLATE_REQUIRED" in str(exc_info.value)
     assert exc_info.value.zernio_log[0]["status_code"] == 400
     assert exc_info.value.zernio_log[0]["response"]["error"] == "approved template required"
+
+
+def test_send_alert_raises_delivery_error_with_log_when_network_fails():
+    client = ZernioClient(
+        api_key="secret-key",
+        base_url="https://zernio.example/api/v1",
+        account_id="account-1",
+        sender_phone="+12025550100",
+        recipient_phone="+15550001111",
+        conversation_id="conversation-1",
+        session=TimeoutSession(),
+    )
+
+    with pytest.raises(ZernioDeliveryError) as exc_info:
+        client.send_alert("Alerta")
+
+    assert "request timed out" in str(exc_info.value)
+    assert exc_info.value.zernio_log[0]["path"] == "/inbox/conversations/conversation-1/messages"
+    assert exc_info.value.zernio_log[0]["status_code"] is None

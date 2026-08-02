@@ -187,20 +187,39 @@ class ZernioClient:
             "Authorization": f"Bearer {self.api_key}",
         }
 
-        response = self.session.request(
-            method=method,
-            url=url,
-            params={key: value for key, value in (params or {}).items() if value is not None},
-            json=json_body,
-            headers=headers,
-            timeout=self.timeout,
-        )
+        clean_params = {
+            key: value for key, value in (params or {}).items() if value is not None
+        }
+        try:
+            response = self.session.request(
+                method=method,
+                url=url,
+                params=clean_params,
+                json=json_body,
+                headers=headers,
+                timeout=self.timeout,
+            )
+        except requests.RequestException as exc:
+            log_entry = {
+                "method": method,
+                "path": path,
+                "params": sanitize(clean_params),
+                "request_body": sanitize(json_body or {}),
+                "status_code": None,
+                "response": {"error": str(exc)},
+            }
+            self.zernio_log.append(log_entry)
+            raise ZernioDeliveryError(
+                f"Zernio request failed: {exc}",
+                deepcopy(self.zernio_log),
+            ) from exc
+
         payload = parse_response(response)
 
         log_entry = {
             "method": method,
             "path": path,
-            "params": sanitize(params or {}),
+            "params": sanitize(clean_params),
             "request_body": sanitize(json_body or {}),
             "status_code": response.status_code,
             "response": sanitize(payload),

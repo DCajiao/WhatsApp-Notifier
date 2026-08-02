@@ -34,6 +34,11 @@ class FakeZernioClient:
         }
 
 
+class ExplodingZernioClient:
+    def send_alert(self, message):
+        raise ConnectionError("zernio connection timed out")
+
+
 @pytest.fixture()
 def client():
     fake_zernio = FakeZernioClient()
@@ -108,3 +113,27 @@ def test_create_app_reads_unprefixed_environment_variables(monkeypatch):
     assert app.config["RECIPIENT_PHONE"] == "15550001111"
     assert app.config["ZERNIO_API_KEY"] == "env-zernio-key"
     assert app.config["ZERNIO_ACCOUNT_ID"] == "env-account"
+
+
+def test_alert_returns_json_when_zernio_client_raises_unexpected_error():
+    app = create_app(
+        {
+            "TESTING": True,
+            "NOTIFIER_TOKEN": "test-token",
+            "RECIPIENT_PHONE": "15550001111",
+            "ZERNIO_CLIENT": ExplodingZernioClient(),
+        }
+    )
+    client = app.test_client()
+
+    response = client.post(
+        "/alert",
+        json={"message": "Alerta"},
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert response.status_code == 502
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert "zernio connection timed out" in payload["error"]
+    assert payload["zernio_log"] == []
