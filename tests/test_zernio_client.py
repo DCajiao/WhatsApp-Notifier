@@ -1,7 +1,9 @@
+import logging
+
 import pytest
 import requests
 
-from whatsapp_notifier.zernio_client import ZernioClient, ZernioDeliveryError
+from whatsapp_notifier.zernio_client import ZernioClient, ZernioDeliveryError, sanitize
 
 
 class FakeResponse:
@@ -96,6 +98,51 @@ def test_from_config_uses_configured_timeout_seconds():
     client.send_alert("CPU alta")
 
     assert session.calls[0]["timeout"] == 75
+
+
+def test_send_alert_logs_zernio_request_without_credentials(caplog):
+    session = FakeSession(
+        [
+            FakeResponse(
+                200,
+                {
+                    "data": {
+                        "messageId": "wamid.logs",
+                        "conversationId": "conversation-1",
+                    }
+                },
+            )
+        ]
+    )
+    client = ZernioClient(
+        api_key="secret-key",
+        base_url="https://zernio.example/api/v1",
+        account_id="account-1",
+        sender_phone="+12025550100",
+        recipient_phone="+15550001111",
+        conversation_id="conversation-1",
+        session=session,
+    )
+
+    with caplog.at_level(logging.INFO, logger="whatsapp_notifier.zernio_client"):
+        client.send_alert("Ticket 2026-08-02 1234567890")
+
+    assert "zernio_request_started" in caplog.text
+    assert "zernio_request_finished" in caplog.text
+    assert "duration_ms" in caplog.text
+    assert "Ticket 2026-08-02 1234567890" in caplog.text
+    assert "secret-key" not in caplog.text
+
+
+def test_sanitize_masks_phone_values_without_masking_messages_with_dates():
+    assert sanitize("+573113232581") == "+573...2581"
+    assert sanitize("573113232581") == "+573...2581"
+    assert sanitize({"accountId": "6a180a034c7f364ffded3c9c"}) == {
+        "accountId": "6a18...3c9c"
+    }
+    assert sanitize("Prueba 2026-08-02 1234567890") == (
+        "Prueba 2026-08-02 1234567890"
+    )
 
 
 def test_send_alert_finds_existing_whatsapp_conversation_before_sending():

@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+instructions.md
 
 .venv/
 venv/

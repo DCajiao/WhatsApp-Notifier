@@ -41,6 +41,7 @@ ZERNIO_ACCOUNT_ID=replace-with-your-zernio-whatsapp-account-id
 ZERNIO_SENDER_PHONE=replace-with-your-zernio-whatsapp-sender
 ZERNIO_CONVERSATION_ID=
 ZERNIO_TIMEOUT_SECONDS=70
+LOG_LEVEL=INFO
 RECIPIENT_PHONE=replace-with-recipient-phone-international-format
 ```
 
@@ -69,6 +70,14 @@ http://localhost:8000
 El contenedor corre Gunicorn con 2 workers, 4 threads por worker y timeout de
 90 segundos porque algunos envios de Zernio pueden tardar mas de 30 segundos en
 responder. Los access logs salen por stdout.
+
+## Logs
+
+La app escribe logs estructurados por stdout, por lo que Render los muestra
+directamente en el panel del servicio. Para diagnosticar Zernio, busca eventos
+como `zernio_request_started`, `zernio_request_finished`,
+`alert_delivery_succeeded` y `alert_delivery_failed`. Los logs incluyen path,
+duracion, status code y respuesta sanitizada; no incluyen tokens ni API keys.
 
 Probar healthcheck:
 

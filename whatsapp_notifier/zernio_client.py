@@ -1,9 +1,17 @@
+import json
+import logging
 import re
+import time
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
 import requests
+
+logger = logging.getLogger(__name__)
+
+MASKED_IDENTIFIER_KEYS = {"accountid", "socialaccountid"}
+SECRET_KEY_MARKERS = {"authorization", "apikey", "secret", "token"}
 
 
 class ZernioDeliveryError(RuntimeError):
@@ -192,6 +200,16 @@ class ZernioClient:
         clean_params = {
             key: value for key, value in (params or {}).items() if value is not None
         }
+        started = time.monotonic()
+        log_zernio_event(
+            logging.INFO,
+            "zernio_request_started",
+            method=method,
+            path=path,
+            params=sanitize(clean_params),
+            request_body=sanitize(json_body or {}),
+            timeout_seconds=self.timeout,
+        )
         try:
             response = self.session.request(
                 method=method,
@@ -208,9 +226,16 @@ class ZernioClient:
                 "params": sanitize(clean_params),
                 "request_body": sanitize(json_body or {}),
                 "status_code": None,
+                "duration_ms": elapsed_ms(started),
                 "response": {"error": str(exc)},
             }
             self.zernio_log.append(log_entry)
+            log_zernio_event(
+                logging.ERROR,
+                "zernio_request_failed",
+                **log_entry,
+                error_type=type(exc).__name__,
+            )
             raise ZernioDeliveryError(
                 f"Zernio request failed: {exc}",
                 deepcopy(self.zernio_log),
@@ -224,9 +249,15 @@ class ZernioClient:
             "params": sanitize(clean_params),
             "request_body": sanitize(json_body or {}),
             "status_code": response.status_code,
+            "duration_ms": elapsed_ms(started),
             "response": sanitize(payload),
         }
         self.zernio_log.append(log_entry)
+        log_zernio_event(
+            logging.WARNING if response.status_code >= 400 else logging.INFO,
+            "zernio_request_finished",
+            **log_entry,
+        )
 
         if response.status_code >= 400:
             raise ZernioDeliveryError(
@@ -259,11 +290,16 @@ def sanitize(value: Any) -> Any:
     if isinstance(value, list):
         return [sanitize(item) for item in value]
     if isinstance(value, dict):
-        return {
-            key: sanitize(item)
-            for key, item in value.items()
-            if key.lower() not in {"authorization", "api_key", "apikey", "token"}
-        }
+        sanitized = {}
+        for key, item in value.items():
+            normalized_key = normalize_key(key)
+            if any(marker in normalized_key for marker in SECRET_KEY_MARKERS):
+                continue
+            if normalized_key in MASKED_IDENTIFIER_KEYS:
+                sanitized[key] = mask_identifier(item)
+                continue
+            sanitized[key] = sanitize(item)
+        return sanitized
     if isinstance(value, (bool, int, float)) or value is None:
         return value
 
@@ -271,9 +307,24 @@ def sanitize(value: Any) -> Any:
     if text.startswith("wamid."):
         return text
     digits = digits_only(text)
-    if len(digits) >= 8 and (text.startswith("+") or len(digits) >= 10):
+    if looks_like_phone(text) and len(digits) >= 8:
         return mask_phone(text)
     return text
+
+
+def looks_like_phone(text: str) -> bool:
+    return bool(re.fullmatch(r"\+?[\d\s().-]+", text.strip()))
+
+
+def normalize_key(key: Any) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(key or "").lower())
+
+
+def mask_identifier(value: Any) -> str:
+    text = str(value or "")
+    if len(text) <= 8:
+        return "***"
+    return f"{text[:4]}...{text[-4:]}"
 
 
 def extract_send_result(payload: Any) -> Tuple[str, str]:
@@ -320,3 +371,16 @@ def parse_timeout_seconds(value: Any) -> float:
     except (TypeError, ValueError):
         return 70
     return timeout if timeout > 0 else 70
+
+
+def elapsed_ms(started: float) -> int:
+    return round((time.monotonic() - started) * 1000)
+
+
+def log_zernio_event(level: int, event: str, **fields: Any) -> None:
+    logger.log(
+        level,
+        "%s %s",
+        event,
+        json.dumps(fields, ensure_ascii=False, sort_keys=True, default=str),
+    )

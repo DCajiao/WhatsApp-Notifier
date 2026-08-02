@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 
 from whatsapp_notifier.app import create_app
@@ -85,6 +87,21 @@ def test_alert_sends_body_message_when_token_is_valid(client):
     assert payload["result"]["message_id"] == "wamid.test"
     assert payload["zernio_log"][0]["path"] == "/inbox/conversations"
     assert client.application.fake_zernio.sent_to == ["Alerta desde tests"]
+
+
+def test_alert_logs_delivery_without_auth_token(client, caplog):
+    with caplog.at_level(logging.INFO, logger="whatsapp_notifier.app"):
+        response = client.post(
+            "/alert",
+            json={"message": "Alerta desde logs"},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+    assert response.status_code == 200
+    assert "alert_request_received" in caplog.text
+    assert "alert_delivery_started" in caplog.text
+    assert "alert_delivery_succeeded" in caplog.text
+    assert "test-token" not in caplog.text
 
 
 def test_alert_ignores_recipient_in_request_body(client):
