@@ -3,8 +3,8 @@
 API pequeña en Flask para recibir una alerta HTTP y enviarla a un único número
 de WhatsApp usando Zernio. Está pensada para casos como monitoreo, alertas
 internas o integraciones simples donde un sistema externo hace `POST /alert`.
-También incluye `POST /start-new-day-conversation` para enviar una plantilla
-aprobada que reabre la conversación diaria de WhatsApp.
+También incluye `POST /start-new-day-conversation` para enviar una plantilla de
+WhatsApp que permite abrir la conversación del día antes de enviar texto libre.
 
 ## Cómo funciona
 
@@ -16,9 +16,27 @@ aprobada que reabre la conversación diaria de WhatsApp.
 
 Cuando la ventana de 24 horas de WhatsApp está cerrada, llama
 `POST /start-new-day-conversation`. Ese endpoint envía el template
-`start_new_day_conversation`: “Nuevo día, nuevas notificaciones. Presiona
-aceptar para recibir notificaciones hoy”, con botón `Aceptar`. Después de que
-el destinatario responda, `POST /alert` vuelve a poder enviar texto libre.
+`start_new_day_conversation`: “🌅 Nuevo día, nuevas notificaciones. Recibe
+nuevas notificationes 🔔”, con botón `Aceptar`. Después de que el destinatario
+responda, `POST /alert` vuelve a poder enviar texto libre.
+
+## Flujo Diario
+
+WhatsApp no entrega mensajes libres si el contacto no ha escrito durante las
+últimas 24 horas. Por eso se agregó un segundo paso:
+
+1. Llama `POST /start-new-day-conversation` al inicio del día o cuando notes que
+   la ventana expiró.
+2. Zernio envía el template `start_new_day_conversation` al destinatario fijo.
+3. El destinatario presiona o responde `Aceptar`.
+4. Esa interacción abre la ventana de 24 horas.
+5. Durante esa ventana, tus integraciones pueden seguir llamando `POST /alert`
+   para enviar notificaciones normales.
+
+Este diseño mantiene `/alert` sencillo y compatible con el comportamiento
+original: solo envía el mensaje recibido en el body. El endpoint nuevo existe
+únicamente para cumplir la regla de WhatsApp sobre conversaciones iniciadas con
+templates aprobados.
 
 ## Sobre Zernio
 
@@ -30,6 +48,16 @@ busca la conversación existente por WhatsApp, remitente y destinatario.
 WhatsApp exige que el destinatario haya abierto una ventana de conversación válida
 o que uses plantillas aprobadas para iniciar/reabrir conversaciones. Este servicio
 envía texto libre a una conversación existente.
+
+El template creado para este proyecto se llama `start_new_day_conversation`. Fue
+creado por API y luego editado por API usando:
+
+- `POST /whatsapp/templates` para crearlo.
+- `PATCH /whatsapp/templates/start_new_day_conversation` para actualizar el copy.
+
+El estado del template se revisa en Zernio dentro de la conexión de WhatsApp, en
+`Settings` -> `Templates`. Si aparece como `PENDING`, Meta/Zernio todavía lo está
+revisando y el envío puede fallar hasta que quede `APPROVED`.
 
 ## Variables de entorno
 
@@ -112,6 +140,23 @@ curl -X POST http://localhost:8000/start-new-day-conversation \
   -H "Authorization: Bearer $NOTIFIER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{}'
+```
+
+Respuesta esperada del template:
+
+```json
+{
+  "ok": true,
+  "result": {
+    "message_id": "wamid...",
+    "conversation_id": "conversation-id",
+    "recipient": "+155...1111",
+    "sent_via": "start_new_day_template",
+    "template_name": "start_new_day_conversation",
+    "template_language": "en_US"
+  },
+  "zernio_log": []
+}
 ```
 
 Respuesta esperada:
