@@ -100,6 +100,49 @@ def test_from_config_uses_configured_timeout_seconds():
     assert session.calls[0]["timeout"] == 75
 
 
+def test_send_start_new_day_conversation_posts_configured_template():
+    session = FakeSession(
+        [
+            FakeResponse(
+                200,
+                {
+                    "data": {
+                        "messageId": "wamid.template",
+                        "conversationId": "conversation-template",
+                    }
+                },
+            )
+        ]
+    )
+    client = ZernioClient(
+        api_key="secret-key",
+        base_url="https://zernio.example/api/v1",
+        account_id="account-1",
+        sender_phone="+12025550100",
+        recipient_phone="+15550001111",
+        start_template_name="start_new_day_conversation",
+        start_template_language="en_US",
+        session=session,
+    )
+
+    result = client.send_start_new_day_conversation()
+
+    assert result["ok"] is True
+    assert result["result"]["message_id"] == "wamid.template"
+    assert result["result"]["conversation_id"] == "conversation-template"
+    assert result["result"]["sent_via"] == "start_new_day_template"
+    assert result["result"]["template_name"] == "start_new_day_conversation"
+    assert session.calls[0]["method"] == "POST"
+    assert session.calls[0]["url"].endswith("/inbox/conversations")
+    assert session.calls[0]["json"] == {
+        "accountId": "account-1",
+        "participantId": "15550001111",
+        "templateName": "start_new_day_conversation",
+        "templateLanguage": "en_US",
+        "templateParams": [],
+    }
+
+
 def test_send_alert_logs_zernio_request_without_credentials(caplog):
     session = FakeSession(
         [

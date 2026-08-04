@@ -31,6 +31,10 @@ class ZernioClient:
             sender_phone=config.get("ZERNIO_SENDER_PHONE", ""),
             recipient_phone=config.get("RECIPIENT_PHONE", ""),
             conversation_id=config.get("ZERNIO_CONVERSATION_ID", ""),
+            start_template_name=config.get(
+                "ZERNIO_START_TEMPLATE_NAME", "start_new_day_conversation"
+            ),
+            start_template_language=config.get("ZERNIO_START_TEMPLATE_LANGUAGE", "en_US"),
             session=config.get("ZERNIO_SESSION"),
             timeout=parse_timeout_seconds(config.get("ZERNIO_TIMEOUT_SECONDS")),
         )
@@ -43,6 +47,8 @@ class ZernioClient:
         sender_phone: str,
         recipient_phone: str,
         conversation_id: str = "",
+        start_template_name: str = "start_new_day_conversation",
+        start_template_language: str = "en_US",
         session: Optional[requests.Session] = None,
         timeout: float = 70,
     ) -> None:
@@ -52,6 +58,8 @@ class ZernioClient:
         self.sender_phone = sender_phone
         self.recipient_phone = recipient_phone
         self.conversation_id = conversation_id
+        self.start_template_name = start_template_name
+        self.start_template_language = start_template_language
         self.session = session or requests.Session()
         self.timeout = timeout
         self.zernio_log: List[Dict[str, Any]] = []
@@ -94,6 +102,46 @@ class ZernioClient:
                 "conversation_id": response_conversation_id or conversation_id,
                 "recipient": mask_phone(self.recipient_phone),
                 "sent_via": sent_via,
+            },
+            "zernio_log": deepcopy(self.zernio_log),
+        }
+
+    def send_start_new_day_conversation(self) -> Dict[str, Any]:
+        self.zernio_log = []
+        self._validate_config()
+        if not self.start_template_name:
+            raise ZernioDeliveryError(
+                "missing configuration: ZERNIO_START_TEMPLATE_NAME",
+                deepcopy(self.zernio_log),
+            )
+        if not self.start_template_language:
+            raise ZernioDeliveryError(
+                "missing configuration: ZERNIO_START_TEMPLATE_LANGUAGE",
+                deepcopy(self.zernio_log),
+            )
+
+        payload = self._request(
+            "POST",
+            "/inbox/conversations",
+            json_body={
+                "accountId": self.account_id,
+                "participantId": digits_only(self.recipient_phone),
+                "templateName": self.start_template_name,
+                "templateLanguage": self.start_template_language,
+                "templateParams": [],
+            },
+        )
+
+        message_id, response_conversation_id = extract_send_result(payload)
+        return {
+            "ok": True,
+            "result": {
+                "message_id": message_id,
+                "conversation_id": response_conversation_id or self.conversation_id,
+                "recipient": mask_phone(self.recipient_phone),
+                "sent_via": "start_new_day_template",
+                "template_name": self.start_template_name,
+                "template_language": self.start_template_language,
             },
             "zernio_log": deepcopy(self.zernio_log),
         }

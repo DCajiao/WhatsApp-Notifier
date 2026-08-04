@@ -8,6 +8,7 @@ from whatsapp_notifier.app import create_app
 class FakeZernioClient:
     def __init__(self):
         self.sent_to = []
+        self.started_new_day = False
 
     def send_alert(self, message):
         self.sent_to.append(message)
@@ -32,6 +33,28 @@ class FakeZernioClient:
                     "status_code": 200,
                     "response": {"messageId": "wamid.test"},
                 },
+            ],
+        }
+
+    def send_start_new_day_conversation(self):
+        self.started_new_day = True
+        return {
+            "ok": True,
+            "result": {
+                "message_id": "wamid.template",
+                "conversation_id": "conversation-test",
+                "recipient": "+155...1111",
+                "sent_via": "start_new_day_template",
+                "template_name": "start_new_day_conversation",
+                "template_language": "en_US",
+            },
+            "zernio_log": [
+                {
+                    "method": "POST",
+                    "path": "/inbox/conversations",
+                    "status_code": 200,
+                    "response": {"messageId": "wamid.template"},
+                }
             ],
         }
 
@@ -70,7 +93,7 @@ def test_root_returns_service_status(client):
     assert response.get_json() == {
         "ok": True,
         "service": "whatsapp-notifier",
-        "endpoints": ["/health", "/alert"],
+        "endpoints": ["/health", "/alert", "/start-new-day-conversation"],
     }
 
 
@@ -165,3 +188,26 @@ def test_alert_returns_json_when_zernio_client_raises_unexpected_error():
     assert payload["ok"] is False
     assert "zernio connection timed out" in payload["error"]
     assert payload["zernio_log"] == []
+
+
+def test_start_new_day_conversation_requires_bearer_token(client):
+    response = client.post("/start-new-day-conversation", json={})
+
+    assert response.status_code == 401
+    assert response.get_json() == {"ok": False, "error": "unauthorized"}
+
+
+def test_start_new_day_conversation_sends_template_when_token_is_valid(client):
+    response = client.post(
+        "/start-new-day-conversation",
+        json={},
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["result"]["message_id"] == "wamid.template"
+    assert payload["result"]["sent_via"] == "start_new_day_template"
+    assert payload["result"]["template_name"] == "start_new_day_conversation"
+    assert client.application.fake_zernio.started_new_day is True

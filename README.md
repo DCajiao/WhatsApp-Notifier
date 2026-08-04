@@ -3,6 +3,8 @@
 API pequeña en Flask para recibir una alerta HTTP y enviarla a un único número
 de WhatsApp usando Zernio. Está pensada para casos como monitoreo, alertas
 internas o integraciones simples donde un sistema externo hace `POST /alert`.
+También incluye `POST /start-new-day-conversation` para enviar una plantilla
+aprobada que reabre la conversación diaria de WhatsApp.
 
 ## Cómo funciona
 
@@ -11,6 +13,12 @@ internas o integraciones simples donde un sistema externo hace `POST /alert`.
 3. El destinatario siempre sale de `RECIPIENT_PHONE`, nunca del body.
 4. El cliente de Zernio busca una conversación de Inbox existente y envía el texto.
 5. La respuesta incluye el resultado del envío y un `zernio_log` sanitizado.
+
+Cuando la ventana de 24 horas de WhatsApp está cerrada, llama
+`POST /start-new-day-conversation`. Ese endpoint envía el template
+`start_new_day_conversation`: “Nuevo día, nuevas notificaciones. Presiona
+aceptar para recibir notificaciones hoy”, con botón `Aceptar`. Después de que
+el destinatario responda, `POST /alert` vuelve a poder enviar texto libre.
 
 ## Sobre Zernio
 
@@ -41,6 +49,8 @@ ZERNIO_ACCOUNT_ID=replace-with-your-zernio-whatsapp-account-id
 ZERNIO_SENDER_PHONE=replace-with-your-zernio-whatsapp-sender
 ZERNIO_CONVERSATION_ID=
 ZERNIO_TIMEOUT_SECONDS=70
+ZERNIO_START_TEMPLATE_NAME=start_new_day_conversation
+ZERNIO_START_TEMPLATE_LANGUAGE=en_US
 LOG_LEVEL=INFO
 RECIPIENT_PHONE=replace-with-recipient-phone-international-format
 ```
@@ -93,6 +103,15 @@ curl -X POST http://localhost:8000/alert \
   -H "Authorization: Bearer $NOTIFIER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"message":"Alerta desde Docker"}'
+```
+
+Enviar template para iniciar el día:
+
+```bash
+curl -X POST http://localhost:8000/start-new-day-conversation \
+  -H "Authorization: Bearer $NOTIFIER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{}'
 ```
 
 Respuesta esperada:

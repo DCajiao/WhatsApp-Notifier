@@ -27,6 +27,8 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
         ZERNIO_SENDER_PHONE="",
         ZERNIO_CONVERSATION_ID="",
         ZERNIO_TIMEOUT_SECONDS="70",
+        ZERNIO_START_TEMPLATE_NAME="start_new_day_conversation",
+        ZERNIO_START_TEMPLATE_LANGUAGE="en_US",
     )
 
     for key in (
@@ -38,6 +40,8 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
         "ZERNIO_SENDER_PHONE",
         "ZERNIO_CONVERSATION_ID",
         "ZERNIO_TIMEOUT_SECONDS",
+        "ZERNIO_START_TEMPLATE_NAME",
+        "ZERNIO_START_TEMPLATE_LANGUAGE",
     ):
         if key in os.environ:
             app.config[key] = os.environ[key]
@@ -54,7 +58,7 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
             {
                 "ok": True,
                 "service": "whatsapp-notifier",
-                "endpoints": ["/health", "/alert"],
+                "endpoints": ["/health", "/alert", "/start-new-day-conversation"],
             }
         )
 
@@ -119,6 +123,56 @@ def create_app(test_config: Optional[Dict[str, Any]] = None) -> Flask:
             logger,
             logging.INFO,
             "alert_delivery_succeeded",
+            duration_ms=elapsed_ms(started),
+            result=result.get("result", {}),
+            zernio_log=result.get("zernio_log", []),
+            **request_context,
+        )
+        return jsonify(result)
+
+    @app.post("/start-new-day-conversation")
+    def start_new_day_conversation():
+        started = time.monotonic()
+        request_context = {
+            "remote_addr": request.headers.get("X-Forwarded-For", request.remote_addr),
+            "content_length": request.content_length,
+            "content_type": request.content_type,
+        }
+        log_event(logger, logging.INFO, "start_conversation_request_received", **request_context)
+
+        if not is_authorized(request.headers, current_app.config["NOTIFIER_TOKEN"]):
+            log_event(
+                logger,
+                logging.WARNING,
+                "start_conversation_request_unauthorized",
+                **request_context,
+            )
+            return jsonify({"ok": False, "error": "unauthorized"}), 401
+
+        log_event(logger, logging.INFO, "start_conversation_delivery_started", **request_context)
+
+        try:
+            result = current_app.config["ZERNIO_CLIENT"].send_start_new_day_conversation()
+        except Exception as exc:
+            zernio_log = getattr(exc, "zernio_log", [])
+            log_event(
+                logger,
+                logging.ERROR,
+                "start_conversation_delivery_failed",
+                error=str(exc),
+                duration_ms=elapsed_ms(started),
+                zernio_log=zernio_log,
+                **request_context,
+            )
+            return (
+                jsonify({"ok": False, "error": str(exc), "zernio_log": zernio_log}),
+                502,
+            )
+
+        log_event(
+            logger,
+            logging.INFO,
+            "start_conversation_delivery_succeeded",
             duration_ms=elapsed_ms(started),
             result=result.get("result", {}),
             zernio_log=result.get("zernio_log", []),
